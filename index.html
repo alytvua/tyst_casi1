@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Plinko — Semi-3D (Stable No-Module)</title>
+  <title>Plinko — Semi-3D (Fixed Physics)</title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <style>
     html,body{height:100%;margin:0;background:#0f172a;overflow:hidden}
@@ -13,12 +13,9 @@
     .legend{display:flex;gap:8px;align-items:center}
     .dot{width:14px;height:14px;border-radius:50%;border:1px solid rgba(255,255,255,.6)}
     #seed{width:140px;background:#0f1624;color:#e8eefb;border:1px solid #2b3d5c;border-radius:10px;padding:9px 10px}
-    #dbg{position:fixed;left:12px;top:12px;color:#b8c7ff;font:12px/1.3 ui-sans-serif;opacity:.75}
   </style>
 </head>
 <body>
-  <div id="dbg">init…</div>
-
   <div id="ui">
     <button id="drop" class="btn">Drop 10 Balls</button>
     <button id="reset" class="btn">Reset</button>
@@ -34,106 +31,100 @@
     </div>
   </div>
 
-  <!-- Проверенные версии БЕЗ модулей -->
+  <!-- Проверенные глобальные версии -->
   <script src="https://unpkg.com/three@0.149.0/build/three.min.js"></script>
   <script src="https://unpkg.com/three@0.149.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/cannon@0.6.2/build/cannon.min.js"></script>
 
   <script>
-    const dbg = document.getElementById('dbg');
-    const log = (t)=>{ dbg.textContent = t; console.log(t); };
-
-    // ---------- Renderer ----------
+    // ---------- renderer ----------
     const renderer = new THREE.WebGLRenderer({ antialias:true, alpha:false });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.setClearColor(0x0f172a, 1);
     renderer.shadowMap.enabled = true;
     document.body.appendChild(renderer.domElement);
-
     const scene = new THREE.Scene();
 
-    // ---------- Camera ----------
-    const camera = new THREE.PerspectiveCamera(35, window.innerWidth/window.innerHeight, 0.1, 200);
-    camera.position.set(0, 26, 14);
-
-    // ---------- Controls (безопасный фолбэк) ----------
+    // ---------- camera (отдалил) ----------
+    const camera = new THREE.PerspectiveCamera(35, window.innerWidth/window.innerHeight, 0.1, 300);
+    camera.position.set(0, 34, 26);
     let controls = null;
-    if (THREE && typeof THREE.OrbitControls === 'function') {
+    if (typeof THREE.OrbitControls === 'function') {
       controls = new THREE.OrbitControls(camera, renderer.domElement);
       controls.enableDamping = true; controls.enablePan = false;
+      controls.minDistance = 24; controls.maxDistance = 46;
+      controls.minPolarAngle = THREE.Math.degToRad(32);
+      controls.maxPolarAngle = THREE.Math.degToRad(65);
       controls.target.set(0,0,0); controls.update();
-      log('OrbitControls: OK');
     } else {
-      // Статичная камера, но всё работает
       camera.lookAt(0,0,0);
-      log('OrbitControls: MISSING (using static camera)');
     }
 
-    // ---------- Lights ----------
+    // ---------- lights ----------
     scene.add(new THREE.AmbientLight(0xffffff, 0.35));
-    const key = new THREE.DirectionalLight(0xffffff, 1.1);
-    key.position.set(12, 24, 12); key.castShadow = true;
-    key.shadow.mapSize.set(2048, 2048);
+    const key = new THREE.DirectionalLight(0xffffff, 1.15);
+    key.position.set(12, 26, 12); key.castShadow = true;
+    key.shadow.mapSize.set(2048,2048);
     scene.add(key);
     const rim = new THREE.DirectionalLight(0x9bbcff, 0.5);
-    rim.position.set(-10, 16, -12); scene.add(rim);
+    rim.position.set(-10, 18, -12); scene.add(rim);
 
-    // ---------- Physics ----------
+    // ---------- physics ----------
     const world = new CANNON.World();
     world.gravity.set(0, -9.82, 0);
     world.broadphase = new CANNON.NaiveBroadphase();
-    world.solver.iterations = 10;
+    world.solver.iterations = 12;        // стабильнее контакты
 
     const defaultMat = new CANNON.Material("default");
-    const contact = new CANNON.ContactMaterial(defaultMat, defaultMat, { friction:0.16, restitution:0.4 });
+    const contact = new CANNON.ContactMaterial(defaultMat, defaultMat, {
+      friction: 0.25,      // чуть больше трения
+      restitution: 0.25    // меньше отскока
+    });
     world.addContactMaterial(contact);
     world.defaultContactMaterial = contact;
 
-    // ---------- Board ----------
+    // ---------- board ----------
     const boardW = 14, boardH = 22;
     const board = new THREE.Mesh(
       new THREE.PlaneGeometry(boardW, boardH),
-      new THREE.MeshStandardMaterial({
-        color:0x263043, metalness:0.25, roughness:0.55,
-        emissive:0x0b1120, emissiveIntensity:0.15
-      })
+      new THREE.MeshStandardMaterial({ color:0x263043, metalness:0.25, roughness:0.55, emissive:0x0b1120, emissiveIntensity:0.15 })
     );
-    board.rotation.x = -Math.PI/2;
-    board.receiveShadow = true;
-    scene.add(board);
+    board.rotation.x = -Math.PI/2; // визуально горизонтальна
+    board.receiveShadow = true; scene.add(board);
 
-    const tiltDeg = 12; document.getElementById('tiltVal').textContent = tiltDeg + "°";
+    const tiltDeg = 12;
+    document.getElementById('tiltVal').textContent = tiltDeg + "°";
+    const deg2rad = d => d * Math.PI / 180;
+
+    // ФИЗИЧЕСКАЯ плоскость: горизонтально -90° по X + дополнительный наклон вперёд
     const boardBody = new CANNON.Body({ mass:0, material:defaultMat });
     boardBody.addShape(new CANNON.Plane());
-    const deg2rad = d => d * Math.PI / 180;
     boardBody.quaternion.setFromEuler(-Math.PI/2 - deg2rad(tiltDeg), 0, 0, 'XYZ');
     world.addBody(boardBody);
 
-    // ---------- Walls ----------
-    function addWall(x, z, w, t, rotY=0){
-      const h = 1.2;
+    // ---------- walls (выше/толще) ----------
+    function addWall(x, z, w, t, rotY=0, h=1.6){
       const mesh = new THREE.Mesh(
         new THREE.BoxGeometry(w, h, t),
         new THREE.MeshStandardMaterial({ color:0x1b2436, metalness:0.3, roughness:0.45 })
       );
       mesh.position.set(x, h/2, z); mesh.rotation.y = rotY;
-      mesh.castShadow = mesh.receiveShadow = true;
-      scene.add(mesh);
+      mesh.castShadow = mesh.receiveShadow = true; scene.add(mesh);
 
       const body = new CANNON.Body({ mass:0, material:defaultMat });
       body.addShape(new CANNON.Box(new CANNON.Vec3(w/2, h/2, t/2)));
       body.position.set(x, h/2, z);
-      const q = new CANNON.Quaternion(); q.setFromEuler(0, rotY, 0, 'XYZ');
-      body.quaternion.copy(q);
+      const q = new CANNON.Quaternion(); q.setFromEuler(0, rotY, 0, 'XYZ'); body.quaternion.copy(q);
       world.addBody(body);
     }
-    addWall( 0,  boardH/2-0.2, boardW, 0.4, 0);
-    addWall( 0, -boardH/2+0.2, boardW, 0.4, 0);
-    addWall(-boardW/2+0.2, 0, boardH, 0.4, Math.PI/2);
-    addWall( boardW/2-0.2, 0, boardH, 0.4, Math.PI/2);
+    // рамка
+    addWall( 0,  boardH/2-0.2, boardW, 0.6, 0, 1.8);
+    addWall( 0, -boardH/2+0.2, boardW, 0.6, 0, 1.8);
+    addWall(-boardW/2+0.2, 0, boardH, 0.6, Math.PI/2, 1.8);
+    addWall( boardW/2-0.2, 0, boardH, 0.6, Math.PI/2, 1.8);
 
-    // ---------- Pins ----------
+    // ---------- pins ----------
     const pinR = 0.17, pinH = 0.6, rowGap = 1.0, colGap = 1.0, rows = 14;
     const pinGeo = new THREE.CylinderGeometry(pinR, pinR, pinH, 20);
     const pinMat = new THREE.MeshStandardMaterial({ color:0x2f3b59, metalness:0.6, roughness:0.35 });
@@ -147,28 +138,43 @@
         const y = pinH/2;
 
         const m = new THREE.Mesh(pinGeo, pinMat);
-        m.position.set(x, y, z);
-        m.castShadow = m.receiveShadow = true;
-        scene.add(m);
+        m.position.set(x, y, z); m.castShadow = m.receiveShadow = true; scene.add(m);
 
         const body = new CANNON.Body({ mass:0, material:defaultMat });
-        const shape = new CANNON.Cylinder(pinR, pinR, pinH, 12);
-        body.addShape(shape);
+        body.addShape(new CANNON.Cylinder(pinR, pinR, pinH, 12));
         body.position.set(x, y, z);
-        const q = new CANNON.Quaternion(); q.setFromEuler(Math.PI/2, 0, 0, 'XYZ');
-        body.quaternion.copy(q);
+        const q = new CANNON.Quaternion(); q.setFromEuler(Math.PI/2, 0, 0, 'XYZ'); body.quaternion.copy(q);
         world.addBody(body);
       }
     }
 
-    // ---------- Slots ----------
-    const slotCount = 7, slotWidth = boardW / slotCount, slotZ = -boardH/2 + 0.6;
+    // ---------- slots (перегородки + нижний лоток-пол) ----------
+    const slotCount = 7;
+    const slotWidth = boardW / slotCount;
+    const slotZ = -boardH/2 + 0.6;
+
+    // Перегородки
     for (let s=0; s<=slotCount; s++){
       const x = -boardW/2 + s*slotWidth;
-      addWall(x, slotZ, 0.25, 0.4, Math.PI/2);
+      addWall(x, slotZ, 0.3, 0.5, Math.PI/2, 1.4);
     }
+    // НИЖНИЙ ЛОТОК: невысокий пол, который ловит шары и не даёт им упасть
+    (function addCatcher(){
+      const catchDepth = 2.0;        // глубина лотка вдоль Z
+      const catchY = 0.18;           // высота пола (чуть выше низа бортов)
+      const geo = new THREE.BoxGeometry(boardW-0.8, catchY, catchDepth);
+      const mat = new THREE.MeshStandardMaterial({ color:0x1a2234, metalness:0.2, roughness:0.6 });
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.position.set(0, catchY/2, slotZ - catchDepth/2 - 0.15); // прямо за перегородками
+      mesh.castShadow = mesh.receiveShadow = true; scene.add(mesh);
 
-    // ---------- Balls ----------
+      const body = new CANNON.Body({ mass:0, material:defaultMat });
+      body.addShape(new CANNON.Box(new CANNON.Vec3((boardW-0.8)/2, catchY/2, catchDepth/2)));
+      body.position.copy(mesh.position);
+      world.addBody(body);
+    })();
+
+    // ---------- balls ----------
     const colors = [0xff4d4d, 0x5dd9ff, 0x7cff6b, 0xffd166, 0xd291ff];
     const ballR = 0.22;
     const balls = [];
@@ -176,19 +182,19 @@
     function spawnBall(color){
       const mesh = new THREE.Mesh(
         new THREE.SphereGeometry(ballR, 32, 32),
-        new THREE.MeshPhysicalMaterial({
-          color, roughness:0.2, metalness:0.1, clearcoat:0.7, clearcoatRoughness:0.25
-        })
+        new THREE.MeshPhysicalMaterial({ color, roughness:0.25, metalness:0.1, clearcoat:0.7, clearcoatRoughness:0.25 })
       );
-      mesh.castShadow = mesh.receiveShadow = true;
-      scene.add(mesh);
+      mesh.castShadow = mesh.receiveShadow = true; scene.add(mesh);
 
       const body = new CANNON.Body({
-        mass:0.16, material:defaultMat,
-        shape:new CANNON.Sphere(ballR),
-        linearDamping:0.01, angularDamping:0.01
+        mass: 0.18,
+        material: defaultMat,
+        shape: new CANNON.Sphere(ballR),
+        linearDamping: 0.02,
+        angularDamping: 0.02
       });
-      body.position.set((Math.random()-0.5)*(boardW*0.6), 4.0, boardH/2 - 1.0);
+      // старт сверху по центру с небольшим разбросом
+      body.position.set((Math.random()-0.5)*(boardW*0.55), 2.4, boardH/2 - 1.0 - Math.random()*0.3);
       world.addBody(body);
 
       balls.push({ mesh, body });
@@ -203,30 +209,34 @@
       balls.length = 0;
     };
 
-    // ---------- Loop ----------
+    // ---------- loop ----------
     const clock = new THREE.Clock();
     (function animate(){
       requestAnimationFrame(animate);
       const dt = Math.min(clock.getDelta(), 1/30);
-      world.step(1/60, dt, 8);
+      // больше субшагов — меньше “проскакиваний” контактов
+      world.step(1/60, dt, 3);
+
       for (const b of balls){
         b.mesh.position.copy(b.body.position);
         b.mesh.quaternion.copy(b.body.quaternion);
+        // если вдруг вылетел наверх/вниз — мягко остановим в лотке
+        if (b.body.position.y < -1) {
+          b.body.velocity.set(0,0,0);
+          b.body.angularVelocity.set(0,0,0);
+          b.body.position.y = 0.2;
+        }
       }
       if (controls) controls.update();
       renderer.render(scene, camera);
     })();
 
-    // ---------- Resize ----------
+    // ---------- resize ----------
     addEventListener('resize', ()=>{
       renderer.setSize(innerWidth, innerHeight);
       camera.aspect = innerWidth/innerHeight;
       camera.updateProjectionMatrix();
     });
-
-    // Лог ошибок в уголок
-    window.addEventListener('error', e => log('Error: ' + e.message));
-    log('Ready');
   </script>
 </body>
 </html>
