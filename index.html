@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Plinko — Semi-3D</title>
+  <title>Plinko — Semi-3D (No Modules)</title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <style>
     html,body{height:100%;margin:0;background:#0f172a;overflow:hidden}
@@ -31,65 +31,68 @@
     </div>
   </div>
 
-  <script type="module">
-    import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160/build/three.module.js";
-    import { OrbitControls } from "https://cdn.jsdelivr.net/npm/three@0.160/examples/jsm/controls/OrbitControls.js";
-    import * as CANNON from "https://cdn.jsdelivr.net/npm/cannon-es@0.20/dist/cannon-es.js";
+  <!-- Three (global), OrbitControls (global), Cannon (global, не ES) -->
+  <script src="https://cdn.jsdelivr.net/npm/three@0.160/build/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.160/examples/js/controls/OrbitControls.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/cannon@0.6.2/build/cannon.min.js"></script>
 
-    // --- renderer / color ---
+  <script>
+    // --- renderer ---
     const renderer = new THREE.WebGLRenderer({ antialias:true, alpha:false });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.setClearColor(0x0f172a, 1);                // фон не чёрный
+    renderer.setClearColor(0x0f172a, 1);
     renderer.shadowMap.enabled = true;
-    THREE.ColorManagement.enabled = true;
-    renderer.outputColorSpace = THREE.SRGBColorSpace;
     document.body.appendChild(renderer.domElement);
 
     const scene = new THREE.Scene();
 
+    // Виден ли рендер: тестовый куб и оси (убери потом)
+    const testMat = new THREE.MeshStandardMaterial({ color:0x89a6ff, metalness:0.2, roughness:0.5 });
+    const testCube = new THREE.Mesh(new THREE.BoxGeometry(1,1,1), testMat);
+    testCube.position.set(-5, 1, 5);
+    testCube.castShadow = true; scene.add(testCube);
+    scene.add(new THREE.AxesHelper(2));
+
     // --- camera ---
     const camera = new THREE.PerspectiveCamera(35, window.innerWidth/window.innerHeight, 0.1, 200);
     camera.position.set(0, 26, 14);
-    const controls = new OrbitControls(camera, renderer.domElement);
-    controls.enableDamping = true;
-    controls.enablePan = false;
-    controls.target.set(0, 0, 0);                       // важный фикс: цель камеры
-    controls.update();
+    const controls = new THREE.OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true; controls.enablePan = false;
+    controls.target.set(0,0,0); controls.update();
 
-    // --- lights (ярче) ---
+    // --- lights ---
     scene.add(new THREE.AmbientLight(0xffffff, 0.35));
     const key = new THREE.DirectionalLight(0xffffff, 1.1);
-    key.position.set(12, 24, 12);
-    key.castShadow = true;
-    key.shadow.mapSize.set(2048, 2048);
+    key.position.set(12, 24, 12); key.castShadow = true; key.shadow.mapSize.set(2048,2048);
     scene.add(key);
     const rim = new THREE.DirectionalLight(0x9bbcff, 0.5);
-    rim.position.set(-10, 16, -12);
-    scene.add(rim);
+    rim.position.set(-10, 16, -12); scene.add(rim);
 
-    // --- physics world ---
-    const world = new CANNON.World({ gravity: new CANNON.Vec3(0, -9.82, 0) });
+    // --- physics (cannon 0.6) ---
+    const world = new CANNON.World();
+    world.gravity.set(0, -9.82, 0);
+    world.broadphase = new CANNON.NaiveBroadphase();
+    world.solver.iterations = 10;
+
     const defaultMat = new CANNON.Material("default");
     const contact = new CANNON.ContactMaterial(defaultMat, defaultMat, { friction:0.16, restitution:0.4 });
     world.addContactMaterial(contact);
-    world.defaultContactMaterial = contact;
 
-    // --- board (видимая и физическая) ---
+    // --- board ---
     const boardW = 14, boardH = 22;
-    const boardGeo = new THREE.PlaneGeometry(boardW, boardH);
-    const boardMat = new THREE.MeshStandardMaterial({
-      color: 0x263043, metalness: 0.25, roughness: 0.55, emissive: 0x0b1120, emissiveIntensity: 0.15
-    });
-    const board = new THREE.Mesh(boardGeo, boardMat);
-    board.rotation.x = -Math.PI/2;
-    board.receiveShadow = true;
-    scene.add(board);
+    const board = new THREE.Mesh(
+      new THREE.PlaneGeometry(boardW, boardH),
+      new THREE.MeshStandardMaterial({ color:0x263043, metalness:0.25, roughness:0.55, emissive:0x0b1120, emissiveIntensity:0.15 })
+    );
+    board.rotation.x = -Math.PI/2; board.receiveShadow = true; scene.add(board);
 
     const tiltDeg = 12;
     document.getElementById('tiltVal').textContent = tiltDeg + "°";
-    const boardBody = new CANNON.Body({ mass:0, shape:new CANNON.Plane(), material:defaultMat });
-    boardBody.quaternion.setFromEuler(THREE.MathUtils.degToRad(-tiltDeg), 0, 0);
+    const boardBody = new CANNON.Body({ mass:0, material:defaultMat });
+    boardBody.addShape(new CANNON.Plane());
+    // Наклон вперёд по X (в cannon порядок ZYX)
+    boardBody.quaternion.setFromEuler(-THREE.Math.degToRad(tiltDeg), 0, 0, 'XYZ');
     world.addBody(boardBody);
 
     // --- walls ---
@@ -99,13 +102,12 @@
         new THREE.BoxGeometry(w, h, t),
         new THREE.MeshStandardMaterial({ color:0x1b2436, metalness:0.3, roughness:0.45 })
       );
-      mesh.position.set(x, h/2, z); mesh.rotation.y = rotY; mesh.castShadow = mesh.receiveShadow = true;
-      scene.add(mesh);
+      mesh.position.set(x, h/2, z); mesh.rotation.y = rotY; mesh.castShadow = mesh.receiveShadow = true; scene.add(mesh);
 
       const body = new CANNON.Body({ mass:0, material:defaultMat });
       body.addShape(new CANNON.Box(new CANNON.Vec3(w/2, h/2, t/2)));
       body.position.set(x, h/2, z);
-      body.quaternion.setFromEuler(0, rotY, 0);
+      const q = new CANNON.Quaternion(); q.setFromEuler(0, rotY, 0, 'XYZ'); body.quaternion.copy(q);
       world.addBody(body);
     }
     addWall( 0,  boardH/2-0.2, boardW, 0.4, 0);
@@ -117,28 +119,27 @@
     const pinR = 0.17, pinH = 0.6, rowGap = 1.0, colGap = 1.0, rows = 14;
     const pinGeo = new THREE.CylinderGeometry(pinR, pinR, pinH, 20);
     const pinMat = new THREE.MeshStandardMaterial({ color:0x2f3b59, metalness:0.6, roughness:0.35 });
-    const colsBase = Math.floor(boardW/colGap) + 1;
-    const inst = new THREE.InstancedMesh(pinGeo, pinMat, rows*colsBase);
-    inst.castShadow = inst.receiveShadow = true;
-    scene.add(inst);
-    let idx=0;
+
     for(let r=0;r<rows;r++){
-      const cols = colsBase;
+      const cols = Math.floor(boardW/colGap)+1;
       for(let c=0;c<cols;c++){
         const offset = (r%2===0)?0:colGap/2;
         const x = -boardW/2 + offset + c*colGap;
         const z = boardH/2 - 2 - r*rowGap;
         const y = pinH/2;
-        inst.setMatrixAt(idx++, new THREE.Matrix4().makeTranslation(x,y,z));
+
+        const m = new THREE.Mesh(pinGeo, pinMat);
+        m.position.set(x,y,z); m.castShadow = m.receiveShadow = true; scene.add(m);
 
         const body = new CANNON.Body({ mass:0, material:defaultMat });
-        body.addShape(new CANNON.Cylinder(pinR, pinR, pinH, 14));
+        // В cannon цилиндр ось — Z, повернём, чтобы стоял вертикально по Y
+        const shape = new CANNON.Cylinder(pinR, pinR, pinH, 12);
+        body.addShape(shape);
         body.position.set(x,y,z);
-        body.quaternion.setFromEuler(Math.PI/2,0,0);
+        const q = new CANNON.Quaternion(); q.setFromEuler(Math.PI/2, 0, 0, 'XYZ'); body.quaternion.copy(q);
         world.addBody(body);
       }
     }
-    inst.instanceMatrix.needsUpdate = true;
 
     // --- slots ---
     const slotCount = 7, slotWidth = boardW/slotCount, slotZ = -boardH/2 + 0.6;
@@ -150,27 +151,25 @@
     // --- balls ---
     const colors = [0xff4d4d, 0x5dd9ff, 0x7cff6b, 0xffd166, 0xd291ff];
     const ballR = 0.22;
-    const ballGeo = new THREE.SphereGeometry(ballR, 32, 32);
     const balls = [];
 
     function spawnBall(color){
-      const mesh = new THREE.Mesh(ballGeo, new THREE.MeshPhysicalMaterial({
-        color, roughness:0.2, metalness:0.1, clearcoat:0.7, clearcoatRoughness:0.25
-      }));
-      mesh.castShadow = mesh.receiveShadow = true;
-      scene.add(mesh);
+      const mesh = new THREE.Mesh(new THREE.SphereGeometry(ballR, 32, 32),
+        new THREE.MeshPhysicalMaterial({ color, roughness:0.2, metalness:0.1, clearcoat:0.7, clearcoatRoughness:0.25 })
+      );
+      mesh.castShadow = mesh.receiveShadow = true; scene.add(mesh);
 
       const body = new CANNON.Body({
-        mass:0.16, shape:new CANNON.Sphere(ballR), material:defaultMat,
+        mass:0.16, material:defaultMat,
+        shape:new CANNON.Sphere(ballR),
         linearDamping:0.01, angularDamping:0.01
       });
       body.position.set((Math.random()-0.5)*(boardW*0.6), 4.0, boardH/2-1.0);
       world.addBody(body);
 
-      balls.push({mesh, body});
+      balls.push({ mesh, body });
     }
 
-    // --- UI ---
     document.getElementById('drop').onclick = ()=>{ for(let i=0;i<10;i++) spawnBall(colors[i%colors.length]); };
     document.getElementById('reset').onclick = ()=>{
       balls.forEach(b=>{ scene.remove(b.mesh); world.removeBody(b.body); });
@@ -183,10 +182,11 @@
       requestAnimationFrame(animate);
       const dt = Math.min(clock.getDelta(), 1/30);
       world.step(1/60, dt, 8);
-      for(const b of balls){
+      balls.forEach(b=>{
         b.mesh.position.copy(b.body.position);
         b.mesh.quaternion.copy(b.body.quaternion);
-      }
+      });
+      testCube.rotation.y += 0.01; // видно, что рендер жив
       controls.update();
       renderer.render(scene, camera);
     })();
@@ -196,6 +196,11 @@
       renderer.setSize(innerWidth, innerHeight);
       camera.aspect = innerWidth/innerHeight;
       camera.updateProjectionMatrix();
+    });
+
+    // Быстрый алёрт, если что-то сломалось
+    window.addEventListener('error', e=>{
+      console.log('JS Error:', e.message);
     });
   </script>
 </body>
