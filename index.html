@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Plinko — Semi-3D (No Modules)</title>
+  <title>Plinko — Semi-3D (Works on Netlify)</title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <style>
     html,body{height:100%;margin:0;background:#0f172a;overflow:hidden}
@@ -31,13 +31,13 @@
     </div>
   </div>
 
-  <!-- Three (global), OrbitControls (global), Cannon (global, не ES) -->
-  <script src="https://cdn.jsdelivr.net/npm/three@0.160/build/three.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/three@0.160/examples/js/controls/OrbitControls.js"></script>
+  <!-- ВАЖНО: версии, где OrbitControls доступен как THREE.OrbitControls -->
+  <script src="https://cdn.jsdelivr.net/npm/three@0.149.0/build/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.149.0/examples/js/controls/OrbitControls.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/cannon@0.6.2/build/cannon.min.js"></script>
 
   <script>
-    // --- renderer ---
+    // ---------- Renderer ----------
     const renderer = new THREE.WebGLRenderer({ antialias:true, alpha:false });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.setSize(window.innerWidth, window.innerHeight);
@@ -47,29 +47,25 @@
 
     const scene = new THREE.Scene();
 
-    // Виден ли рендер: тестовый куб и оси (убери потом)
-    const testMat = new THREE.MeshStandardMaterial({ color:0x89a6ff, metalness:0.2, roughness:0.5 });
-    const testCube = new THREE.Mesh(new THREE.BoxGeometry(1,1,1), testMat);
-    testCube.position.set(-5, 1, 5);
-    testCube.castShadow = true; scene.add(testCube);
-    scene.add(new THREE.AxesHelper(2));
-
-    // --- camera ---
+    // ---------- Camera & Controls (глобальный OrbitControls) ----------
     const camera = new THREE.PerspectiveCamera(35, window.innerWidth/window.innerHeight, 0.1, 200);
     camera.position.set(0, 26, 14);
     const controls = new THREE.OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true; controls.enablePan = false;
-    controls.target.set(0,0,0); controls.update();
+    controls.target.set(0, 0, 0); controls.update();
 
-    // --- lights ---
+    // ---------- Lights ----------
     scene.add(new THREE.AmbientLight(0xffffff, 0.35));
     const key = new THREE.DirectionalLight(0xffffff, 1.1);
-    key.position.set(12, 24, 12); key.castShadow = true; key.shadow.mapSize.set(2048,2048);
+    key.position.set(12, 24, 12);
+    key.castShadow = true;
+    key.shadow.mapSize.set(2048, 2048);
     scene.add(key);
     const rim = new THREE.DirectionalLight(0x9bbcff, 0.5);
-    rim.position.set(-10, 16, -12); scene.add(rim);
+    rim.position.set(-10, 16, -12);
+    scene.add(rim);
 
-    // --- physics (cannon 0.6) ---
+    // ---------- Physics (cannon 0.6.2) ----------
     const world = new CANNON.World();
     world.gravity.set(0, -9.82, 0);
     world.broadphase = new CANNON.NaiveBroadphase();
@@ -78,36 +74,46 @@
     const defaultMat = new CANNON.Material("default");
     const contact = new CANNON.ContactMaterial(defaultMat, defaultMat, { friction:0.16, restitution:0.4 });
     world.addContactMaterial(contact);
+    world.defaultContactMaterial = contact;
 
-    // --- board ---
+    // ---------- Board ----------
     const boardW = 14, boardH = 22;
     const board = new THREE.Mesh(
       new THREE.PlaneGeometry(boardW, boardH),
-      new THREE.MeshStandardMaterial({ color:0x263043, metalness:0.25, roughness:0.55, emissive:0x0b1120, emissiveIntensity:0.15 })
+      new THREE.MeshStandardMaterial({
+        color:0x263043, metalness:0.25, roughness:0.55,
+        emissive:0x0b1120, emissiveIntensity:0.15
+      })
     );
-    board.rotation.x = -Math.PI/2; board.receiveShadow = true; scene.add(board);
+    board.rotation.x = -Math.PI/2;
+    board.receiveShadow = true;
+    scene.add(board);
 
     const tiltDeg = 12;
     document.getElementById('tiltVal').textContent = tiltDeg + "°";
     const boardBody = new CANNON.Body({ mass:0, material:defaultMat });
     boardBody.addShape(new CANNON.Plane());
-    // Наклон вперёд по X (в cannon порядок ZYX)
-    boardBody.quaternion.setFromEuler(-THREE.Math.degToRad(tiltDeg), 0, 0, 'XYZ');
+    const deg2rad = d => d * Math.PI / 180;
+    // Наклон вперёд вдоль X
+    boardBody.quaternion.setFromEuler(-deg2rad(tiltDeg), 0, 0, 'XYZ');
     world.addBody(boardBody);
 
-    // --- walls ---
+    // ---------- Walls ----------
     function addWall(x, z, w, t, rotY=0){
       const h = 1.2;
       const mesh = new THREE.Mesh(
         new THREE.BoxGeometry(w, h, t),
         new THREE.MeshStandardMaterial({ color:0x1b2436, metalness:0.3, roughness:0.45 })
       );
-      mesh.position.set(x, h/2, z); mesh.rotation.y = rotY; mesh.castShadow = mesh.receiveShadow = true; scene.add(mesh);
+      mesh.position.set(x, h/2, z); mesh.rotation.y = rotY;
+      mesh.castShadow = mesh.receiveShadow = true;
+      scene.add(mesh);
 
       const body = new CANNON.Body({ mass:0, material:defaultMat });
       body.addShape(new CANNON.Box(new CANNON.Vec3(w/2, h/2, t/2)));
       body.position.set(x, h/2, z);
-      const q = new CANNON.Quaternion(); q.setFromEuler(0, rotY, 0, 'XYZ'); body.quaternion.copy(q);
+      const q = new CANNON.Quaternion(); q.setFromEuler(0, rotY, 0, 'XYZ');
+      body.quaternion.copy(q);
       world.addBody(body);
     }
     addWall( 0,  boardH/2-0.2, boardW, 0.4, 0);
@@ -115,93 +121,99 @@
     addWall(-boardW/2+0.2, 0, boardH, 0.4, Math.PI/2);
     addWall( boardW/2-0.2, 0, boardH, 0.4, Math.PI/2);
 
-    // --- pins ---
+    // ---------- Pins ----------
     const pinR = 0.17, pinH = 0.6, rowGap = 1.0, colGap = 1.0, rows = 14;
     const pinGeo = new THREE.CylinderGeometry(pinR, pinR, pinH, 20);
     const pinMat = new THREE.MeshStandardMaterial({ color:0x2f3b59, metalness:0.6, roughness:0.35 });
 
-    for(let r=0;r<rows;r++){
-      const cols = Math.floor(boardW/colGap)+1;
-      for(let c=0;c<cols;c++){
-        const offset = (r%2===0)?0:colGap/2;
+    for (let r=0; r<rows; r++){
+      const cols = Math.floor(boardW/colGap) + 1;
+      for (let c=0; c<cols; c++){
+        const offset = (r%2===0) ? 0 : colGap/2;
         const x = -boardW/2 + offset + c*colGap;
         const z = boardH/2 - 2 - r*rowGap;
         const y = pinH/2;
 
         const m = new THREE.Mesh(pinGeo, pinMat);
-        m.position.set(x,y,z); m.castShadow = m.receiveShadow = true; scene.add(m);
+        m.position.set(x, y, z);
+        m.castShadow = m.receiveShadow = true;
+        scene.add(m);
 
         const body = new CANNON.Body({ mass:0, material:defaultMat });
-        // В cannon цилиндр ось — Z, повернём, чтобы стоял вертикально по Y
         const shape = new CANNON.Cylinder(pinR, pinR, pinH, 12);
         body.addShape(shape);
-        body.position.set(x,y,z);
-        const q = new CANNON.Quaternion(); q.setFromEuler(Math.PI/2, 0, 0, 'XYZ'); body.quaternion.copy(q);
+        body.position.set(x, y, z);
+        const q = new CANNON.Quaternion(); q.setFromEuler(Math.PI/2, 0, 0, 'XYZ'); // ось цилиндра по Y
+        body.quaternion.copy(q);
         world.addBody(body);
       }
     }
 
-    // --- slots ---
-    const slotCount = 7, slotWidth = boardW/slotCount, slotZ = -boardH/2 + 0.6;
-    for(let s=0;s<=slotCount;s++){
+    // ---------- Slots ----------
+    const slotCount = 7, slotWidth = boardW / slotCount, slotZ = -boardH/2 + 0.6;
+    for (let s=0; s<=slotCount; s++){
       const x = -boardW/2 + s*slotWidth;
       addWall(x, slotZ, 0.25, 0.4, Math.PI/2);
     }
 
-    // --- balls ---
+    // ---------- Balls ----------
     const colors = [0xff4d4d, 0x5dd9ff, 0x7cff6b, 0xffd166, 0xd291ff];
     const ballR = 0.22;
     const balls = [];
 
     function spawnBall(color){
-      const mesh = new THREE.Mesh(new THREE.SphereGeometry(ballR, 32, 32),
-        new THREE.MeshPhysicalMaterial({ color, roughness:0.2, metalness:0.1, clearcoat:0.7, clearcoatRoughness:0.25 })
+      const mesh = new THREE.Mesh(
+        new THREE.SphereGeometry(ballR, 32, 32),
+        new THREE.MeshPhysicalMaterial({
+          color, roughness:0.2, metalness:0.1, clearcoat:0.7, clearcoatRoughness:0.25
+        })
       );
-      mesh.castShadow = mesh.receiveShadow = true; scene.add(mesh);
+      mesh.castShadow = mesh.receiveShadow = true;
+      scene.add(mesh);
 
       const body = new CANNON.Body({
         mass:0.16, material:defaultMat,
         shape:new CANNON.Sphere(ballR),
         linearDamping:0.01, angularDamping:0.01
       });
-      body.position.set((Math.random()-0.5)*(boardW*0.6), 4.0, boardH/2-1.0);
+      body.position.set((Math.random()-0.5)*(boardW*0.6), 4.0, boardH/2 - 1.0);
       world.addBody(body);
 
       balls.push({ mesh, body });
     }
 
-    document.getElementById('drop').onclick = ()=>{ for(let i=0;i<10;i++) spawnBall(colors[i%colors.length]); };
+    // ---------- UI ----------
+    document.getElementById('drop').onclick = ()=>{
+      for (let i=0; i<10; i++) spawnBall(colors[i % colors.length]);
+    };
     document.getElementById('reset').onclick = ()=>{
-      balls.forEach(b=>{ scene.remove(b.mesh); world.removeBody(b.body); });
+      balls.forEach(b => { scene.remove(b.mesh); world.removeBody(b.body); });
       balls.length = 0;
     };
 
-    // --- loop ---
+    // ---------- Loop ----------
     const clock = new THREE.Clock();
     (function animate(){
       requestAnimationFrame(animate);
       const dt = Math.min(clock.getDelta(), 1/30);
       world.step(1/60, dt, 8);
-      balls.forEach(b=>{
+      for (const b of balls){
         b.mesh.position.copy(b.body.position);
         b.mesh.quaternion.copy(b.body.quaternion);
-      });
-      testCube.rotation.y += 0.01; // видно, что рендер жив
+      }
       controls.update();
       renderer.render(scene, camera);
     })();
 
-    // --- resize ---
+    // ---------- Resize ----------
     addEventListener('resize', ()=>{
       renderer.setSize(innerWidth, innerHeight);
       camera.aspect = innerWidth/innerHeight;
       camera.updateProjectionMatrix();
     });
 
-    // Быстрый алёрт, если что-то сломалось
-    window.addEventListener('error', e=>{
-      console.log('JS Error:', e.message);
-    });
+    // На случай ошибок — лог в консоль
+    window.addEventListener('error', e => console.log('JS Error:', e.message));
   </script>
 </body>
 </html>
