@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Plinko — Finish & Leaderboard</title>
+  <title>Plinko — Stable Physics + Leaderboard</title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <style>
     html,body{height:100%;margin:0;background:#0f172a;overflow:hidden}
@@ -18,7 +18,6 @@
     .row{display:flex;align-items:center;gap:8px;margin:4px 0}
     .swatch{width:12px;height:12px;border-radius:50%;border:1px solid rgba(255,255,255,.6)}
     .muted{opacity:.75;font-weight:500}
-    .ok{color:#6bff9a}
   </style>
 </head>
 <body>
@@ -83,13 +82,13 @@
     const world = new CANNON.World();
     world.gravity.set(0, -9.82, 0);
     world.broadphase = new CANNON.NaiveBroadphase();
-    world.solver.iterations = 20;     // больше итераций — стабильнее
-    world.solver.tolerance = 0.001;
+    world.solver.iterations = 30;     // ещё стабильнее контакты
+    world.solver.tolerance = 0.0005;
 
     const defaultMat = new CANNON.Material("default");
     const contact = new CANNON.ContactMaterial(defaultMat, defaultMat, {
-      friction: 0.28,       // чуть больше трения
-      restitution: 0.22     // меньше отскоков => меньше туннелинга
+      friction: 0.32,
+      restitution: 0.12
     });
     world.addContactMaterial(contact);
     world.defaultContactMaterial = contact;
@@ -107,34 +106,53 @@
 
     const boardBody = new CANNON.Body({ mass:0, material:defaultMat });
     boardBody.addShape(new CANNON.Plane());
-    // горизонтально + наклон вперёд
-    boardBody.quaternion.setFromEuler(-Math.PI/2 - deg2rad(tiltDeg), 0, 0, 'XYZ');
+    boardBody.quaternion.setFromEuler(-Math.PI/2 - deg2rad(tiltDeg), 0, 0, 'XYZ'); // горизонтально + наклон
     world.addBody(boardBody);
 
-    // ---------- walls ----------
-    function addWall(x, z, w, t, rotY=0, h=1.7){
+    // ---------- walls (большие ограничители по периметру) ----------
+    function addWallBox(x, y, z, sx, sy, sz){
+      const mesh = new THREE.Mesh(
+        new THREE.BoxGeometry(sx, sy, sz),
+        new THREE.MeshStandardMaterial({ color:0x1b2436, metalness:0.3, roughness:0.45, transparent:true, opacity:0.999 })
+      );
+      mesh.position.set(x,y,z); mesh.castShadow=mesh.receiveShadow=true; scene.add(mesh);
+      const body = new CANNON.Body({ mass:0, material:defaultMat });
+      body.addShape(new CANNON.Box(new CANNON.Vec3(sx/2, sy/2, sz/2)));
+      body.position.set(x,y,z); world.addBody(body);
+    }
+
+    // Рамка видимая (эстетика)
+    function addFrameWall(x, z, w, t, rotY=0, h=2.2){
       const mesh = new THREE.Mesh(
         new THREE.BoxGeometry(w, h, t),
         new THREE.MeshStandardMaterial({ color:0x1b2436, metalness:0.3, roughness:0.45 })
       );
-      mesh.position.set(x, h/2, z); mesh.rotation.y=rotY;
-      mesh.castShadow=mesh.receiveShadow=true; scene.add(mesh);
-
+      mesh.position.set(x, h/2, z); mesh.rotation.y=rotY; mesh.castShadow=mesh.receiveShadow=true; scene.add(mesh);
       const body = new CANNON.Body({ mass:0, material:defaultMat });
       body.addShape(new CANNON.Box(new CANNON.Vec3(w/2, h/2, t/2)));
       body.position.set(x, h/2, z);
-      const q = new CANNON.Quaternion(); q.setFromEuler(0, rotY, 0, 'XYZ'); body.quaternion.copy(q);
+      const q=new CANNON.Quaternion(); q.setFromEuler(0, rotY, 0, 'XYZ'); body.quaternion.copy(q);
       world.addBody(body);
     }
-    addWall( 0,  boardH/2-0.2, boardW, 0.6, 0, 1.9);
-    addWall( 0, -boardH/2+0.2, boardW, 0.6, 0, 1.9);
-    addWall(-boardW/2+0.2, 0, boardH, 0.6, Math.PI/2, 1.9);
-    addWall( boardW/2-0.2, 0, boardH, 0.6, Math.PI/2, 1.9);
+    addFrameWall( 0,  boardH/2-0.2, boardW, 0.6, 0, 2.4);
+    addFrameWall( 0, -boardH/2+0.2, boardW, 0.6, 0, 2.4);
+    addFrameWall(-boardW/2+0.2, 0, boardH, 0.6, Math.PI/2, 2.4);
+    addFrameWall( boardW/2-0.2, 0, boardH, 0.6, Math.PI/2, 2.4);
 
-    // ---------- pins ----------
-    // немного увеличил радиус столбиков для стабильности контактов
-    const pinR = 0.19, pinH = 0.62, rowGap = 1.0, colGap = 1.0, rows = 14;
-    const pinGeo = new THREE.CylinderGeometry(pinR, pinR, pinH, 20);
+    // ДОП. НЕВИДИМЫЕ СТЕНЫ на всю высоту, чтобы шары никогда не улетали за поле
+    const guardH = 4.0, guardT = 0.4;
+    // передняя/задняя
+    addWallBox(0, guardH/2,  boardH/2+0.4, boardW+1.2, guardH, guardT);
+    addWallBox(0, guardH/2, -boardH/2-0.8, boardW+1.2, guardH, guardT);
+    // левая/правая
+    addWallBox(-boardW/2-0.6, guardH/2, 0, guardT, guardH, boardH+2.0);
+    addWallBox( boardW/2+0.6, guardH/2, 0, guardT, guardH, boardH+2.0);
+
+    // ---------- pins (ФИЗИКА = СФЕРЫ; визуал остаётся цилиндрами) ----------
+    const pinR_draw = 0.19, pinH = 0.62;     // видимый цилиндр
+    const pinR_phys = 0.21;                  // физический шар — чуть больше
+    const rowGap = 1.0, colGap = 1.0, rows = 14;
+    const pinGeo = new THREE.CylinderGeometry(pinR_draw, pinR_draw, pinH, 20);
     const pinMat = new THREE.MeshStandardMaterial({ color:0x2f3b59, metalness:0.6, roughness:0.35 });
 
     for(let r=0;r<rows;r++){
@@ -145,13 +163,14 @@
         const z = boardH/2 - 2 - r*rowGap;
         const y = pinH/2;
 
+        // видимый цилиндр
         const m = new THREE.Mesh(pinGeo, pinMat);
         m.position.set(x,y,z); m.castShadow=m.receiveShadow=true; scene.add(m);
 
+        // физическое тело — СФЕРА (стабильнее контакты)
         const body = new CANNON.Body({ mass:0, material:defaultMat });
-        body.addShape(new CANNON.Cylinder(pinR, pinR, pinH, 12));
-        body.position.set(x,y,z);
-        const q = new CANNON.Quaternion(); q.setFromEuler(Math.PI/2,0,0,'XYZ'); body.quaternion.copy(q);
+        body.addShape(new CANNON.Sphere(pinR_phys));
+        body.position.set(x, y, z);
         world.addBody(body);
       }
     }
@@ -161,23 +180,24 @@
     const slotWidth = boardW / slotCount;
     const slotZ = -boardH/2 + 0.6;
 
+    // перегородки (видимые + физика)
     for(let s=0;s<=slotCount;s++){
       const x = -boardW/2 + s*slotWidth;
-      addWall(x, slotZ, 0.3, 0.5, Math.PI/2, 1.4);
+      addFrameWall(x, slotZ, 0.34, 0.6, Math.PI/2, 1.6);
     }
-    // нижний лоток-пол
+    // Нижний лоток-ловушка (шире/глубже)
     (function addCatcher(){
-      const depth = 2.2, h=0.2;
-      const mesh = new THREE.Mesh(new THREE.BoxGeometry(boardW-0.8, h, depth),
+      const depth = 3.2, h=0.24;
+      const mesh = new THREE.Mesh(new THREE.BoxGeometry(boardW-0.5, h, depth),
         new THREE.MeshStandardMaterial({ color:0x1a2234, metalness:0.2, roughness:0.6 }));
-      mesh.position.set(0, h/2, slotZ - depth/2 - 0.1); mesh.castShadow=mesh.receiveShadow=true; scene.add(mesh);
+      mesh.position.set(0, h/2, slotZ - depth/2 - 0.05); mesh.castShadow=mesh.receiveShadow=true; scene.add(mesh);
       const body = new CANNON.Body({ mass:0, material:defaultMat });
-      body.addShape(new CANNON.Box(new CANNON.Vec3((boardW-0.8)/2, h/2, depth/2)));
+      body.addShape(new CANNON.Box(new CANNON.Vec3((boardW-0.5)/2, h/2, depth/2)));
       body.position.copy(mesh.position); world.addBody(body);
     })();
 
-    // ---------- finish line (зелёная) ----------
-    const finishZ = slotZ - 0.25; // рубеж детекции
+    // ---------- finish line ----------
+    const finishZ = slotZ - 0.25;
     const fGeo = new THREE.BoxGeometry(boardW-0.6, 0.05, 0.02);
     const fMat = new THREE.MeshBasicMaterial({ color:0x29ff89 });
     const finishLine = new THREE.Mesh(fGeo, fMat);
@@ -190,43 +210,38 @@
     const ballR = 0.22;
     const balls = [];
     let startTime = 0;
-    const finished = []; // {id, color, tSec}
+    const finished = [];
     const lbEl = document.getElementById('lb');
     const leftEl = document.getElementById('left');
-
     let nextId = 1;
 
     function renderLB(){
       lbEl.innerHTML = '';
-      finished
-        .sort((a,b)=>a.tSec-b.tSec)
-        .forEach((e,i)=>{
-          const row = document.createElement('div');
-          row.className = 'row';
-          row.innerHTML = `<span>${i+1}.</span>
-            <span class="swatch" style="background:#${e.color.toString(16).padStart(6,'0')}"></span>
-            <span>${colorName[e.color]||'#'+e.color.toString(16)}</span>
-            <span class="muted">${e.tSec.toFixed(2)}s</span>`;
-          lbEl.appendChild(row);
-        });
-      const inProgress = balls.filter(b=>!b.finished).length;
-      leftEl.textContent = inProgress;
+      finished.sort((a,b)=>a.tSec-b.tSec).forEach((e,i)=>{
+        const row = document.createElement('div');
+        row.className='row';
+        row.innerHTML=`<span>${i+1}.</span>
+          <span class="swatch" style="background:#${e.color.toString(16).padStart(6,'0')}"></span>
+          <span>${colorName[e.color]||('#'+e.color.toString(16))}</span>
+          <span class="muted">${e.tSec.toFixed(2)}s</span>`;
+        lbEl.appendChild(row);
+      });
+      leftEl.textContent = balls.filter(b=>!b.finished).length;
     }
 
     function spawnBall(color){
       const id = nextId++;
       const mesh = new THREE.Mesh(
         new THREE.SphereGeometry(ballR, 32, 32),
-        new THREE.MeshPhysicalMaterial({ color, roughness:0.25, metalness:0.1, clearcoat:0.7, clearcoatRoughness:0.25 })
+        new THREE.MeshPhysicalMaterial({ color, roughness:0.26, metalness:0.08, clearcoat:0.7, clearcoatRoughness:0.25 })
       );
-      mesh.castShadow = mesh.receiveShadow = true; scene.add(mesh);
+      mesh.castShadow=mesh.receiveShadow=true; scene.add(mesh);
 
       const body = new CANNON.Body({
         mass:0.18, material:defaultMat,
         shape:new CANNON.Sphere(ballR),
         linearDamping:0.03, angularDamping:0.03
       });
-      // старт наверху, небольшой разброс
       body.position.set((Math.random()-0.5)*(boardW*0.55), 2.6, boardH/2 - 1.0 - Math.random()*0.3);
       world.addBody(body);
 
@@ -234,16 +249,19 @@
       renderLB();
     }
 
-    // мягкий «анти-застреватель»: если скорость слишком мала в зоне пинов — даём микропинок
-    function nudgeIfStuck(b){
+    // Анти-застревание + ограничение скорости (ещё сильнее)
+    function stabilizeBall(b){
       const v = b.body.velocity;
       const speed = Math.sqrt(v.x*v.x + v.y*v.y + v.z*v.z);
-      if (speed < 0.05 && b.body.position.z > slotZ-3 && b.body.position.z < boardH/2 && b.body.position.y > 0.15){
-        b.body.velocity.x += (Math.random()-0.5)*0.12;
-        b.body.velocity.z += (Math.random()-0.6)*0.08;
+
+      // мягкий пинок в зоне пинов
+      if (speed < 0.04 && b.body.position.z > slotZ-4 && b.body.position.z < boardH/2 && b.body.position.y > 0.15){
+        b.body.velocity.x += (Math.random()-0.5)*0.10;
+        b.body.velocity.z += (Math.random()-0.6)*0.06;
       }
-      // ограничим максимальную скорость (меньше проскоков)
-      const maxV = 6;
+
+      // ограничение скорости — меньше туннелинга
+      const maxV = 4.2;
       if (speed > maxV){
         const scale = maxV / speed;
         b.body.velocity.scale(scale, b.body.velocity);
@@ -260,39 +278,36 @@
       balls.length = 0; finished.length = 0; renderLB();
     };
 
-    // ---------- loop ----------
-    let accum = 0;
-    const fixed = 1/120;    // более частый фикс-степ
+    // ---------- loop (частый фикс-шаг) ----------
     const clock = new THREE.Clock();
-
+    let accumulator = 0;
+    const fixedStep = 1/240;     // маленький шаг
     (function animate(){
       requestAnimationFrame(animate);
       const dt = Math.min(clock.getDelta(), 0.05);
-      accum += dt;
-      // несколько внутренних шагов для устойчивости (убирает "проваливание")
-      while (accum >= fixed){
-        world.step(1/180, fixed, 10);  // маленький шаг + побольше сабстепов
-        accum -= fixed;
+      accumulator += dt;
+      // несколько маленьких шагов подряд
+      while (accumulator >= fixedStep){
+        world.step(fixedStep);
+        accumulator -= fixedStep;
       }
 
       for (const b of balls){
-        // апдейт меша
+        stabilizeBall(b);
+
         b.mesh.position.copy(b.body.position);
         b.mesh.quaternion.copy(b.body.quaternion);
 
-        // анти-застревание + ограничение скорости
-        nudgeIfStuck(b);
-
-        // детекция финиша (пересечение finishZ сверху вниз)
+        // финиш — пересечение линии сверху вниз
         if (!b.finished && b.prevZ > finishZ && b.body.position.z <= finishZ){
           b.finished = true;
-          const tSec = (performance.now() - startTime) / 1000;
+          const tSec = (performance.now() - startTime)/1000;
           finished.push({ id:b.id, color:b.color, tSec });
           renderLB();
         }
         b.prevZ = b.body.position.z;
 
-        // «страховка» от падения за сцену
+        // страховка от выпадения (возвращаем в лоток)
         if (b.body.position.y < -2){
           b.body.velocity.set(0,0,0);
           b.body.angularVelocity.set(0,0,0);
