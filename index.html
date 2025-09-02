@@ -107,7 +107,7 @@
     const boardBody = new CANNON.Body({ mass:0, material:defaultMat });
     boardBody.addShape(new CANNON.Plane());
     const deg2rad = d => d * Math.PI / 180;
-    boardBody.quaternion.setFromEuler(-deg2rad(tiltDeg), 0, 0, 'XYZ'); // наклон вперёд
+    boardBody.quaternion.setFromEuler(-Math.PI/2 - deg2rad(tiltDeg), 0, 0, 'XYZ');
     world.addBody(boardBody);
 
     // ---------- Walls ----------
